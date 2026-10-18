@@ -1,0 +1,17 @@
+# Builds the Nix package and boots the NixOS VM test, so a go.sum change that
+# needs a new vendorHash in nix/package.nix shows up here.
+name: nix
+
+on:
+  pull_request:
+    paths: ["flake.nix", "flake.lock", "nix/**", "backend/go.mod", "backend/go.sum", "frontend/package-lock.json"]
+  push:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - run: nix flake check -L
