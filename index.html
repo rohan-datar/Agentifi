@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review queue: three structures and a hybrid</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+:root{--ink:#17181a;--t2:#4e5157;--t3:#686c73;--line:#e3e4e7;--line2:#d3d5d9;--ground:#f3f3f4;--chip:#ebecee;--white:#fff;
+ --urgent:#b4410c;--urgent-bg:#fbefe8;--r:12px;--font:"Inter",ui-sans-serif,system-ui,sans-serif}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--albedo-bg,#fafafa);color:var(--albedo-text,#17181a);font-family:var(--albedo-sans,var(--font))}
+::selection{background:#17181a;color:#fff}
+.board{max-width:1320px;margin:0 auto;padding:28px 24px 64px}
+.board h1{font-size:26px;letter-spacing:-.02em;margin:0 0 6px;font-weight:650;text-wrap:balance}
+.board .lede{color:var(--albedo-muted,#555);max-width:72ch;margin:0 0 22px;line-height:1.5;font-size:15px}
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin:0 0 18px;position:sticky;top:0;z-index:5;padding:10px 0;background:var(--albedo-bg,#fafafa)}
+.seg{display:inline-flex;border:1px solid var(--albedo-border,#ddd);border-radius:10px;padding:3px;background:var(--albedo-surface,#fff)}
+.seg button{all:unset;cursor:pointer;padding:7px 14px;border-radius:7px;font-size:14px;font-weight:550;color:var(--albedo-muted,#555)}
+.seg button[aria-pressed=true]{background:var(--albedo-text,#17181a);color:var(--albedo-bg,#fff)}
+.seg button:focus-visible{outline:2px solid var(--albedo-accent,#2563eb);outline-offset:2px}
+.dir{border-top:1px solid var(--albedo-border,#e2e2e2);padding:26px 0 30px}
+.dirhead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px 28px;align-items:start;margin-bottom:18px}
+.dirhead h2{margin:0 0 4px;font-size:21px;letter-spacing:-.015em;font-weight:650}
+.dirhead .thesis{margin:0;color:var(--albedo-muted,#555);font-size:15px;line-height:1.5;max-width:70ch}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 24px;margin-top:12px;max-width:980px}
+.facts div{font-size:13.5px;line-height:1.5;color:var(--albedo-text,#222)}
+.facts b{display:block;font-size:12.5px;font-weight:650;color:var(--albedo-muted,#666);margin-bottom:2px}
+.pick{all:unset;cursor:pointer;border:1px solid var(--albedo-text,#17181a);border-radius:10px;padding:9px 16px;font-size:14px;font-weight:600;white-space:nowrap}
+.pick:hover{background:var(--albedo-text,#17181a);color:var(--albedo-bg,#fff)}
+.pick:focus-visible{outline:2px solid var(--albedo-accent,#2563eb);outline-offset:2px}
+.frames{display:flex;gap:22px;overflow-x:auto;padding:6px 2px 14px;scroll-snap-type:x proximity}
+.frame{flex:0 0 auto;scroll-snap-align:start}
+.frame figcaption{font-size:12.5px;color:var(--albedo-muted,#666);margin:0 0 8px;font-weight:550}
+/* ---- mock screens: fixed greyscale world ---- */
+.scr{font-family:var(--font);color:var(--ink);background:var(--white);font-feature-settings:"tnum" 1,"cv11" 1;-webkit-font-smoothing:antialiased;position:relative;overflow:hidden}
+.phone{width:360px;height:740px;border-radius:34px;border:1px solid #cfd1d5;box-shadow:0 18px 40px -18px rgba(20,22,26,.28),0 2px 6px rgba(20,22,26,.06);display:flex;flex-direction:column}
+.desk{width:1180px;height:720px;border-radius:14px;border:1px solid #cfd1d5;box-shadow:0 18px 40px -18px rgba(20,22,26,.25);display:grid;grid-template-columns:76px 380px minmax(0,1fr)}
+.status{height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:12.5px;font-weight:600}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:6px 18px 10px;flex:0 0 auto}
+.topbar h3{margin:0;font-size:22px;letter-spacing:-.02em;font-weight:680}
+.iconbtn{all:unset;cursor:pointer;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--t2)}
+.iconbtn:hover{background:var(--chip)}
+.iconbtn:focus-visible,.row:focus-visible,.btn:focus-visible,.chip:focus-visible,.lanecard:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.body{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding:0 0 12px}
+.body::-webkit-scrollbar{width:6px}.body::-webkit-scrollbar-thumb{background:#d3d5d9;border-radius:3px}
+.tabbar{flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);padding:6px 6px 18px;background:#fff}
+.tab{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:560;color:var(--t3);position:relative}
+.tab svg{width:22px;height:22px;stroke-width:1.75}
+.tab.on{color:var(--ink)}
+.badge{position:absolute;top:-3px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:var(--ink);color:#fff;font-size:10.5px;font-weight:650;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:18px 18px 6px}
+.sec h4{margin:0;font-size:13px;font-weight:650;letter-spacing:0}
+.sec span{font-size:12.5px;color:var(--t3)}
+.row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 18px;cursor:pointer;border-bottom:1px solid var(--line)}
+.row:hover{background:#f8f8f9}
+.row.sel{background:var(--ground)}
+.ico{width:34px;height:34px;border-radius:9px;background:var(--chip);display:grid;place-items:center;color:var(--t2)}
+.ico svg{width:17px;height:17px;stroke-width:1.9}
+.ico.u{background:var(--urgent-bg);color:var(--urgent)}
+.rt{font-size:14.5px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rd{font-size:12.5px;color:var(--t3);line-height:1.35;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rd.u{color:var(--urgent);font-weight:600}
+.amt{font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:9px;font-size:13.5px;font-weight:600;padding:8px 12px;line-height:1;white-space:nowrap}
+.btn.p{background:var(--ink);color:#fff}.btn.p:hover{background:#000}
+.btn.s{border:1px solid var(--line2);color:var(--ink);background:#fff}.btn.s:hover{background:var(--ground)}
+.btn.g{color:var(--t2)}.btn.g:hover{background:var(--chip)}
+.btn.sm{padding:6px 10px;font-size:12.5px}
+.btn.wide{box-sizing:border-box;width:100%;padding:13px 14px;font-size:14.5px}
+.toast{position:absolute;left:14px;right:14px;bottom:86px;background:var(--ink);color:#fff;border-radius:12px;padding:12px 14px;font-size:13.5px;display:flex;justify-content:space-between;align-items:center;transform:translateY(12px);opacity:0;transition:transform .32s cubic-bezier(.16,1,.3,1),opacity .2s;pointer-events:none}
+.toast.show{transform:none;opacity:1;pointer-events:auto}
+.toast button{all:unset;cursor:pointer;font-weight:650;text-decoration:underline;text-underline-offset:3px}
+.desk .toast{left:auto;right:24px;bottom:24px;width:340px}
+.empty{padding:48px 28px;text-align:center;color:var(--t2);font-size:14px;line-height:1.5}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
+.leaving{animation:leave .28s cubic-bezier(.16,1,.3,1) forwards}
+@keyframes leave{to{opacity:0;transform:translateX(24px)}}
+/* home */
+.hello{padding:4px 18px 0;font-size:13px;color:var(--t3)}
+.hcard{margin:14px 14px 0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.hcard .hh{display:flex;justify-content:space-between;align-items:baseline;padding:14px 14px 8px}
+.hcard .hh h4{margin:0;font-size:15px;font-weight:650}
+.hcard .hh a{font-size:13px;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.hcard .row{padding:10px 14px}
+.hcard .row:last-child{border-bottom:0}
+.ghost{margin:12px 14px 0;border:1px dashed var(--line2);border-radius:var(--r);padding:14px;color:var(--t3);font-size:13px}
+.ghost b{display:block;color:var(--t2);font-size:13.5px;margin-bottom:6px}
+.bar{height:8px;border-radius:4px;background:var(--chip);margin-top:6px}
+/* detail */
+.dt{padding:2px 18px 0}
+.dt .k{font-size:12.5px;color:var(--t3);font-weight:600;margin:4px 0 6px}
+.dt .k.u{color:var(--urgent)}
+.dt h3{margin:0 0 6px;font-size:21px;letter-spacing:-.02em;line-height:1.25;font-weight:680;text-wrap:balance}
+.dt p{margin:0 0 14px;color:var(--t2);font-size:14px;line-height:1.5}
+.ev{border:1px solid var(--line);border-radius:var(--r);margin:0 0 14px}
+.ev .evh{font-size:12px;font-weight:650;color:var(--t3);padding:10px 12px 0}
+.evrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:13.5px}
+.evrow:last-child{border-bottom:0}
+.evrow small{grid-column:1/-1;color:var(--t3);font-size:12px}
+.evrow .keep{font-size:11.5px;font-weight:650;background:var(--chip);border-radius:6px;padding:2px 6px;margin-left:6px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 14px}
+.pair .side{border:1px solid var(--line);border-radius:var(--r);padding:11px 12px;font-size:13px;line-height:1.45}
+.pair .side.keepside{border-color:var(--ink)}
+.pair .side b{display:block;font-size:12px;color:var(--t3);margin-bottom:4px}
+.pair .side .a{font-size:16px;font-weight:650;margin:2px 0}
+.acts{display:flex;flex-direction:column;gap:8px;margin:4px 0 8px}
+.alts{display:flex;gap:8px;flex-wrap:wrap}
+.note{font-size:12.5px;color:var(--t3);line-height:1.45;margin:6px 0 0}
+.snooze{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.code{display:flex;gap:8px;margin:0 0 10px}
+.code input{flex:1;min-width:0;font:inherit;font-size:20px;letter-spacing:.3em;font-weight:600;padding:11px 12px;border:1px solid var(--line2);border-radius:10px;text-align:center;caret-color:var(--urgent)}
+.code input:focus{outline:2px solid var(--ink);outline-offset:1px}
+.conf{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);font-weight:600}
+.conf i{display:inline-block;width:46px;height:5px;border-radius:3px;background:var(--chip);position:relative;overflow:hidden}
+.conf i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:var(--ink)}
+/* A: time spine */
+.spine{position:relative;padding-left:0}
+.slot{display:grid;grid-template-columns:72px minmax(0,1fr)}
+.slot .when{padding:13px 14px 0 10px;text-align:right;font-size:11.5px;font-weight:650;color:var(--t3);line-height:1.25;position:relative}
+.slot .when.u{color:var(--urgent)}
+.slot .when::after{content:"";position:absolute;right:-5px;top:17px;width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid var(--line2);z-index:1}
+.slot .when.u::after{border-color:var(--urgent);background:var(--urgent)}
+.slot .when.past::after{background:var(--line2)}
+.slot .cell{border-left:2px solid var(--line);padding-left:0}
+.slot .cell .row{padding-left:12px;grid-template-columns:minmax(0,1fr) auto}
+.slot .cell .row .ico{display:none}
+.nowline{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;margin:2px 0}
+.nowline span{font-size:11px;font-weight:700;color:var(--urgent);padding-right:14px;text-align:right}
+.nowline i{height:2px;background:var(--urgent);display:block;margin-left:-1px}
+.band{padding:16px 18px 6px;font-size:12.5px;font-weight:650;color:var(--t3);display:flex;justify-content:space-between}
+/* B: lanes */
+.lane{padding:14px 0 4px;border-bottom:1px solid var(--line)}
+.lanehead{display:flex;justify-content:space-between;align-items:center;padding:0 18px 8px}
+.lanehead h4{margin:0;font-size:14px;font-weight:650;display:flex;align-items:center;gap:8px}
+.lanehead h4 .n{font-size:12px;font-weight:650;background:var(--chip);border-radius:6px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.lanehead h4 .n.u{background:var(--urgent);color:#fff}
+.shelf{display:flex;gap:10px;overflow-x:auto;padding:2px 18px 12px;scroll-snap-type:x mandatory;scroll-padding-inline:18px;scrollbar-width:none}
+.shelf::-webkit-scrollbar{display:none}
+.lanecard{flex:0 0 236px;scroll-snap-align:start;border:1px solid var(--line);border-radius:var(--r);padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:118px;background:#fff}
+.lanecard:hover{border-color:var(--line2)}
+.lanecard.sel{border-color:var(--ink)}
+.lanecard.u{border-color:var(--urgent)}
+.lanecard .rt{white-space:normal}
+.lanecard .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:center}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 14px}
+.chip{all:unset;cursor:pointer;display:inline-flex;gap:6px;align-items:center;font-size:12.5px;font-weight:600;border:1px solid var(--line2);border-radius:999px;padding:5px 10px}
+.chip .n{font-variant-numeric:tabular-nums;color:var(--t3)}
+.chip.u{border-color:var(--urgent);color:var(--urgent)}.chip.u .n{color:var(--urgent)}
+/* C: tiers */
+.tier{display:flex;flex-direction:column;gap:2px;padding:18px 18px 8px;border-bottom:1px solid var(--line)}
+.tier h4{margin:0;font-size:13.5px;font-weight:680}
+.tier.u h4{color:var(--urgent)}
+.tier span{font-size:12px;color:var(--t3)}
+.row.trow{grid-template-columns:34px minmax(0,1fr) auto}
+.row.urow{background:linear-gradient(var(--urgent-bg),var(--urgent-bg))}
+.collapse{padding:10px 18px;font-size:13px;font-weight:600;color:var(--t2);cursor:pointer;border-bottom:1px solid var(--line)}
+/* desktop */
+.rail{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 0;background:#fafafa}
+.rail .tab{padding:8px 0;width:64px;border-radius:10px}
+.rail .tab.on{background:var(--chip)}
+.rail .logo{width:30px;height:30px;border-radius:8px;background:var(--ink);margin-bottom:14px}
+.listpane{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.listpane .topbar{padding:18px 18px 8px}
+.listpane .body{padding-bottom:20px}
+.detailpane{display:flex;flex-direction:column;min-height:0}
+.detailpane .body{padding:28px 40px 30px}
+.detailpane .dt{max-width:640px;padding:0}
+.kbd{display:flex;gap:14px;font-size:12px;color:var(--t3);padding:10px 18px;border-top:1px solid var(--line)}
+.kbd kbd{font:inherit;font-weight:650;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--t2);background:#fff}
+.desk .lanecard{flex-basis:300px}
+.declined{margin-top:30px;border-top:1px solid var(--albedo-border,#e2e2e2);padding-top:18px;font-size:13.5px;color:var(--albedo-muted,#555);line-height:1.55;max-width:90ch}
+.declined b{color:var(--albedo-text,#222)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:700px){.dirhead{grid-template-columns:1fr}.board{padding:20px 14px 48px}}
+</style></head><body>
+<main class="board">
+<h1>The review queue: three structures and a hybrid</h1>
+<p class="lede">Each option arranges the same invented household's eleven decisions and two ideas differently. This round is about structure and flow, not looks: greyscale on purpose, with one colour reserved for “act now”. Everything is clickable: download this file and open it in a browser. Decide an item (it leaves, with Undo), open one, snooze one. On desktop, j/k move, a does the main action and s snoozes.</p>
+<div class="controls">
+ <div class="seg" role="group" aria-label="Device"><button data-view="phone" aria-pressed="true">Phone</button><button data-view="desktop" aria-pressed="false">Desktop</button></div>
+ <div class="seg" role="group" aria-label="Jump to"><button data-jump="D" aria-pressed="false">D · Hybrid</button><button data-jump="A" aria-pressed="false">A · By when</button><button data-jump="B" aria-pressed="false">B · By kind</button><button data-jump="C" aria-pressed="false">C · By stakes</button></div>
+</div>
+<div id="dirs"></div>
+<div class="declined"><b>Out of scope this round:</b> visual identity. There is no palette, type or brand yet, because the product name isn't settled. Greyscale is deliberate, and the one accent colour does one job only: it marks things that cost something if they wait.</div>
+</main>
+<script>
+const MONEY = n => "$" + n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+// One invented household. Round figures, names that belong to nobody.
+const BASE = [
+ {key:"code", kind:"sign_in_code", tier:1, icon:"key-round", title:"Northshore Power wants a code", detail:"Sent to the phone ending 40", when:{slot:"now",label:"4 min",sort:0}, urgent:true,
+  primary:"Send code", alts:[], noDismiss:"It expires on its own.", lane:"Sign-ins",
+  body:"The provider sent a six-digit code to sign in for this month's statement. Enter it here and the pull continues on the server.", ev:"code"},
+ {key:"reconnect", kind:"bank_reconnect", tier:1, icon:"plug-zap", title:"Reconnect Harbor Credit Union", detail:"Sync stopped 2 days ago", when:{slot:"overdue",label:"2 days",sort:-2}, urgent:true,
+  primary:"Reconnect", alts:["Snooze"], lane:"Sign-ins",
+  body:"The bank refused the saved access. Until it's reconnected, Everyday Checking and Rainy Day Savings show balances from 2 days ago, and net worth is out of date.",
+  evRows:[["Everyday Checking","last synced Oct 29"],["Rainy Day Savings","last synced Oct 29"]]},
+ {key:"water", kind:"bill_past_due", tier:2, icon:"receipt", title:"City Water is past due", detail:"Expected Oct 28", amount:60, when:{slot:"overdue",label:"3 days",sort:-3},
+  primary:"Mark paid", alts:["Link a payment","Skip this one"], lane:"Bills",
+  body:"No payment matched this bill's usual amount and wording within its window.", evRows:[["Expected","$60.00 · Oct 28"],["Last paid","$60.00 · Sep 28"]]},
+ {key:"power-stmt", kind:"statement_due", tier:2, icon:"file-text", title:"Pay Northshore Power by hand", detail:"Statement due Mon, Nov 3", amount:84, when:{slot:"soon",label:"Mon",sort:3},
+  primary:"Mark paid", alts:["Open provider"], lane:"Bills",
+  body:"This provider isn't paid automatically. The statement arrived Oct 20.", evRows:[["Statement","$84.00 · due Nov 3"],["Arrived","Oct 20, from the provider's site"]]},
+ {key:"dup", kind:"duplicate", tier:2, icon:"copy", title:"Possible duplicate at Corner Market", detail:"Two rows, Oct 29", amount:42, when:{slot:"open",sort:10},
+  primary:"Keep the synced row", alts:["Both are real"], slow:true, lane:"Duplicates",
+  body:"Same amount and wording, one day apart. One came from the bank, one from a file import.", ev:"pair"},
+ {key:"held", kind:"held_balance", tier:2, icon:"shield-alert", title:"Held a sudden balance on Everyday Checking", detail:"Bank reported $0.00", amount:2400, when:{slot:"open",sort:11},
+  primary:"Accept $0.00", alts:["Keep holding"], lane:"Balances",
+  body:"The bank reported a balance of $0.00 with no transactions to explain the drop. The last good balance is being held until you decide.",
+  evRows:[["Held","$2,400.00 · Oct 30"],["Reported","$0.00 · Oct 31"]]},
+ {key:"orphans", kind:"orphan_transfers", tier:2, icon:"arrow-left-right", title:"3 transfers lost their other half", detail:"$120.00 is missing from reports", amount:120, when:{slot:"open",sort:12},
+  primary:"Repair", alts:[], noDismiss:"There's no “no” for this one.", lane:"Balances",
+  body:"A transfer leg whose partner was deleted counts as neither income nor spending, so its money quietly drops out of reports. Repair releases the pairs so each row counts again.",
+  evRows:[["Savings → Checking","$50.00 · Oct 3"],["Checking → Card","$40.00 · Oct 12"],["Checking → Savings","$30.00 · Oct 19"]]},
+ {key:"cat-group", kind:"category_suggestion", tier:3, icon:"tag", title:"5 rows from Corner Market", detail:"Suggested: Groceries", amount:210, when:{slot:"open",sort:20}, group:5,
+  primary:"Accept all 5", alts:["Choose another","Decline"], lane:"Categories", conf:["Likely","82%"],
+  body:"Your past rows from this payee were Groceries 14 times out of 15.", evRows:[["Oct 27","$40.00"],["Oct 22","$50.00"],["Oct 18","$30.00"],["Oct 11","$45.00"],["Oct 6","$45.00"]]},
+ {key:"cat-cafe", kind:"category_suggestion", tier:3, icon:"tag", title:"PARKSIDE CAFE", detail:"Suggested: Dining out", amount:18, when:{slot:"open",sort:21},
+  primary:"Accept", alts:["Choose another","Decline"], lane:"Categories", conf:["A guess","40%"],
+  body:"No past rows from this payee. The suggestion comes from the name alone.", evRows:[["Oct 30","$18.00 · Everyday Card"]]},
+ {key:"undet", kind:"undetermined", tier:3, icon:"circle-help", title:"2 rows the check couldn't place", detail:"Choose a category for each", amount:null, when:{slot:"open",sort:22},
+  primary:"Choose categories", alts:[], noDismiss:"Snooze is the only “not now”.", lane:"Categories",
+  body:"The category check found no confident answer for these.", evRows:[["SQ *MARKET STALL","$12.00 · Oct 26"],["POS 4410 TERMINAL","$25.00 · Oct 24"]]},
+ {key:"unrev", kind:"unreviewed", tier:3, icon:"list-checks", title:"23 rows not yet reviewed", detail:"Opens the register in review mode", amount:null, when:{slot:"open",sort:23},
+  primary:"Start reviewing", alts:[], lane:"Categories",
+  body:"Row-by-row review stays in the register, where swipe and bulk mark-reviewed already work. This item is just the door."},
+ {key:"recur", kind:"recurring_suggestion", tier:4, icon:"repeat", title:"Streamline Video looks monthly", detail:"About $15.00 on the 2nd", amount:15, when:{slot:"ideas",sort:40},
+  primary:"Add as a bill", alts:["Not recurring"], lane:"Ideas", body:"Seen on the 2nd of each of the last 4 months, $15.00 every time."},
+ {key:"order", kind:"unmatched_order", tier:4, icon:"package", title:"An order with no matching charge", detail:"Online order, Oct 25", amount:64, when:{slot:"ideas",sort:41},
+  primary:"Find the charge", alts:["Ignore order"], lane:"Ideas", body:"No card charge within 5 days matched this order's total."},
+];
+const counts = items => items.filter(i=>i.tier<=3).length;
+const state = {D:{items:[],sel:"code"},A:{items:[],sel:"dup"},B:{items:[],sel:"cat-group"},C:{items:[],sel:"water"}};
+for (const k in state) state[k].items = BASE.map(x=>({...x}));
+let VIEW = "phone";
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ic = (n,cls="") => `<i data-lucide="${n}" class="${cls}"></i>`;
+const amt = i => i.amount==null ? "" : MONEY(i.amount);
+
+const DIRS = [
+ {id:"D", name:"D · By when, with kind counts on Home", thesis:"A hybrid of A and B. The Review tab is A's agenda: a time spine with a “now” line, overdue above, the expiring code at the line, this week below, and everything with no deadline in one band underneath. Home is B's card: one chip per kind with its count, plus the most urgent item.",
+  move:"Two views of one queue. Home answers “what kinds of things are waiting?” at a glance; Review answers “what do I do first?” by time.",
+  path:"Glance at Home and see Sign-ins 2, Bills 2, Categories 4. Open Review and work down from the “now” line.",
+  risk:"Same as A: only 4 of the 11 items have a deadline, so the band below the spine carries most of the queue. One fix to try next is giving that band C's stakes headings. Home's chips are counts only and don't link to a filtered view yet."},
+ {id:"A", name:"A · By when", thesis:"The queue is an agenda. Items hang off a time spine with a “now” line: overdue above, the expiring code at the line, this week below. Anything with no deadline waits in one band under the spine, by amount.",
+  move:"The time spine. Urgency is a place on a line, not a colour or a label to read.",
+  path:"Open Home and see “next: code expires in 4 min”. Tap it, enter the code, and the line moves on to the next thing.",
+  risk:"Most items have no deadline. Duplicates, held balances and categories all fall into the band below the spine, so the spine carries only 4 of the 11, and the band is the old long list again."},
+ {id:"B", name:"B · By kind", thesis:"The queue is shelves, one per kind of decision: sign-ins, bills, duplicates, balances, categories, ideas. Each shelf has a count and its own bulk action, and its cards swipe sideways. Shelves are ordered by their most urgent card.",
+  move:"The per-shelf bulk action: “Accept all 6 suggestions” lives on the Categories shelf, next to the cards it would decide.",
+  path:"Open Review and clear one shelf at a time. Most days that's the Categories shelf, done with one bulk accept.",
+  risk:"Sideways shelves hide cards, and two urgent things of different kinds sit on different shelves. Shelf order helps, but no single line says what to do first."},
+ {id:"C", name:"C · By stakes", thesis:"The queue is one list in four tiers, headed by what's at stake: needs you now, money at stake, tidy up, ideas. Each row carries its main action on the right, so a pass down the list works with one thumb. Tidy-up collapses after 5 rows.",
+  move:"The stakes headings. Every tier says why it's there, and only “needs you now” rows are tinted.",
+  path:"Open Home and see the top 5 of the same list. A pass down /review decides most rows without opening them.",
+  risk:"It's the most familiar of the three, and the closest to the #17 proposal as written. A large import can make Tidy up dominate even when collapsed."},
+];
+
+function tabbar(active, n){
+ const t=[["house","Home"],["list","Activity"],["inbox","Review"],["calendar-range","Plan"],["chart-line","Insights"]];
+ return `<nav class="tabbar" aria-label="Main">${t.map(([i,l])=>`<div class="tab ${l===active?"on":""}">${ic(i)}${l==="Review"&&n?`<span class="badge">${n}</span>`:""}${l==="Home"&&n&&active!=="Review"?"":""}<span>${l}</span></div>`).join("")}</nav>`;
+}
+function rail(n){
+ const t=[["house","Home"],["list","Activity"],["inbox","Review"],["calendar-range","Plan"],["chart-line","Insights"]];
+ return `<nav class="rail" aria-label="Main"><div class="logo" aria-hidden="true"></div>${t.map(([i,l])=>`<div class="tab ${l==="Review"?"on":""}">${ic(i)}${l==="Review"&&n?`<span class="badge">${n}</span>`:""}<span>${l}</span></div>`).join("")}<div style="margin-top:auto" class="tab">${ic("sparkles")}<span>Assistant</span></div></nav>`;
+}
+const status = () => `<div class="status"><span>9:41</span><span>●●● ▲ ▮</span></div>`;
+
+function row(d, i, opts={}){
+ const sel = state[d].sel===i.key && opts.selectable ? " sel":"";
+ const dcls = i.urgent ? "rd u" : "rd";
+ const detail = i.urgent && i.when.label ? (i.kind==="sign_in_code"?`Expires in ${i.when.label}`:`${i.detail}`) : i.detail;
+ return `<div class="row ${opts.cls||""}${sel}" tabindex="0" data-d="${d}" data-open="${i.key}">
+  ${opts.noIcon?"":`<div class="ico ${i.urgent?"u":""}">${ic(i.icon)}</div>`}
+  <div style="min-width:0"><div class="rt">${esc(i.title)}</div><div class="${dcls}">${esc(detail)}</div></div>
+  <div style="display:flex;align-items:center;gap:10px">${opts.action?`<button class="btn s sm" data-d="${d}" data-act="${i.key}">${esc(shortAct(i))}</button>`:`<span class="amt">${amt(i)}</span>`}</div></div>`;
+}
+const shortAct = i => ({sign_in_code:"Enter code",bank_reconnect:"Reconnect",bill_past_due:"Mark paid",statement_due:"Mark paid",duplicate:"Review",held_balance:"Review",orphan_transfers:"Repair",category_suggestion: i.group?"Accept 5":"Accept",undetermined:"Choose",unreviewed:"Start",recurring_suggestion:"Add",unmatched_order:"Find"}[i.kind]);
+
+// ---------- A: by when ----------
+function listA(d, opts){
+ const it = state[d].items; const by = s => it.filter(i=>i.when.slot===s).sort((a,b)=>a.when.sort-b.when.sort);
+ const slot = (i, cls) => `<div class="slot"><div class="when ${cls}">${esc(i.when.label||"")}</div><div class="cell">${row(d,i,{...opts,noIcon:true})}</div></div>`;
+ let h = `<div class="spine">`;
+ for (const i of by("overdue")) h += slot(i, (i.urgent?"u ":"")+"past");
+ h += `<div class="nowline"><span>Now</span><i></i></div>`;
+ for (const i of by("now")) h += slot(i,"u");
+ for (const i of by("soon")) h += slot(i,"");
+ h += `</div>`;
+ const open = by("open").sort((a,b)=>(b.amount||0)-(a.amount||0));
+ if (open.length) h += `<div class="band"><span>No deadline · largest first</span><span>${open.length}</span></div>` + open.map(i=>row(d,i,opts)).join("");
+ const ideas = by("ideas");
+ if (ideas.length) h += `<div class="band"><span>Ideas · not counted</span><span>${ideas.length}</span></div>` + ideas.map(i=>row(d,i,opts)).join("");
+ return h;
+}
+function homeA(d){
+ const it = state[d].items.filter(i=>i.tier<=3); const timed = it.filter(i=>["now","overdue","soon"].includes(i.when.slot)).sort((a,b)=>(a.when.slot==="now"?-9:a.when.sort)-(b.when.slot==="now"?-9:b.when.sort));
+ const next = timed[0];
+ return `<div class="hcard"><div class="hh"><h4>To review</h4><a>All ${counts(state[d].items)}</a></div>
+  ${next?`<div style="padding:0 14px 10px"><div class="rd ${next.urgent?"u":""}" style="font-size:12px;margin:0 0 4px">Next · ${next.when.slot==="now"?"expires in "+next.when.label:next.when.slot==="overdue"?next.when.label+" late":"due "+next.when.label}</div></div>${row(d,next,{})}`:""}
+  ${timed.slice(1,3).map(i=>row(d,i,{})).join("")}
+  <div class="rd" style="padding:10px 14px 12px">${it.length-timed.length} more with no deadline</div></div>`;
+}
+// ---------- B: by kind ----------
+const LANES = ["Sign-ins","Bills","Duplicates","Balances","Categories","Ideas"];
+function lanesOf(d){
+ const it = state[d].items;
+ return LANES.map(n=>({n, items: it.filter(i=>i.lane===n).sort((a,b)=>a.tier-b.tier)})).filter(l=>l.items.length)
+  .sort((a,b)=>Math.min(...a.items.map(i=>i.tier*10+(i.urgent?0:5)))-Math.min(...b.items.map(i=>i.tier*10+(i.urgent?0:5))));
+}
+const laneBulk = l => l.n==="Categories" && l.items.some(i=>i.kind==="category_suggestion") ? `Accept all ${l.items.filter(i=>i.kind==="category_suggestion").reduce((s,i)=>s+(i.group||1),0)}` : l.n==="Bills"?"Mark all paid":null;
+function listB(d){
+ return lanesOf(d).map(l=>{
+  const u = l.items.some(i=>i.urgent); const b = laneBulk(l);
+  return `<section class="lane"><div class="lanehead"><h4>${esc(l.n)} <span class="n ${u?"u":""}">${l.items.length}</span></h4>${b?`<button class="btn g sm" data-d="${d}" data-bulk="${esc(l.n)}">${esc(b)}</button>`:""}</div>
+   <div class="shelf">${l.items.map(i=>`<div class="lanecard ${i.urgent?"u":""} ${state[d].sel===i.key?"sel":""}" tabindex="0" data-d="${d}" data-open="${i.key}">
+     <div class="ico ${i.urgent?"u":""}">${ic(i.icon)}</div><div class="rt">${esc(i.title)}</div><div class="rd ${i.urgent?"u":""}">${esc(i.kind==="sign_in_code"?"Expires in "+i.when.label:i.detail)}</div>
+     <div class="foot"><span class="amt">${amt(i)}</span><button class="btn s sm" data-d="${d}" data-act="${i.key}">${esc(shortAct(i))}</button></div></div>`).join("")}</div></section>`;}).join("");
+}
+function homeB(d){
+ const ls = lanesOf(d).filter(l=>l.n!=="Ideas");
+ return `<div class="hcard"><div class="hh"><h4>To review</h4><a>All ${counts(state[d].items)}</a></div>
+  <div class="chips">${ls.map(l=>`<button class="chip ${l.items.some(i=>i.urgent)?"u":""}">${esc(l.n)} <span class="n">${l.items.length}</span></button>`).join("")}</div>
+  ${ls[0]?row(d,ls[0].items[0],{}):""}</div>`;
+}
+// ---------- C: by stakes ----------
+const TIERS = {1:["Needs you now","Costs something if it waits"],2:["Money at stake","Balances and reports are off until decided"],3:["Tidy up","Categories and review"],4:["Ideas","Not counted"]};
+function listC(d, opts){
+ const it = state[d].items; let h="";
+ for (const t of [1,2,3,4]){
+  const rs = it.filter(i=>i.tier===t); if(!rs.length) continue;
+  h += `<div class="tier ${t===1?"u":""}"><h4>${TIERS[t][0]}</h4><span>${TIERS[t][1]}</span></div>`;
+  const shown = t===3 && !state[d].expand3 ? rs.slice(0,3) : rs;
+  h += shown.map(i=>row(d,i,{...opts,action:true,cls:"trow"+(t===1?" urow":"")})).join("");
+  if (t===3 && rs.length>3 && !state[d].expand3) h += `<div class="collapse" data-d="${d}" data-expand="1">Show ${rs.length-3} more</div>`;
+ }
+ return h;
+}
+function homeC(d){
+ const it = state[d].items.filter(i=>i.tier<=3).sort((a,b)=>a.tier-b.tier);
+ return `<div class="hcard"><div class="hh"><h4>To review</h4><a>See all ${counts(state[d].items)}</a></div>${it.slice(0,4).map(i=>row(d,i,{action:true,cls:"trow"+(i.tier===1?" urow":"")})).join("")}</div>`;
+}
+const LIST = {A:listA,B:listB,C:listC,D:listA}, HOME = {A:homeA,B:homeB,C:homeC,D:homeB};
+
+// ---------- shared item detail ----------
+function detail(d){
+ const i = state[d].items.find(x=>x.key===state[d].sel) || state[d].items[0];
+ if (!i) return `<div class="empty"><b>Nothing to review</b>Last checked at today's 6:00 sync. Next up: City Water, due Nov 28.</div>`;
+ let ev = "";
+ if (i.ev==="code") ev = `<div class="code"><input inputmode="numeric" maxlength="6" placeholder="······" aria-label="Six-digit code"></div>`;
+ else if (i.ev==="pair") ev = `<div class="pair"><div class="side keepside"><b>From the bank · keep</b><div class="a">$42.00</div>CORNER MARKET 0419<br>Oct 29 · Everyday Card</div><div class="side"><b>From a file import</b><div class="a">$42.00</div>Corner Market<br>Oct 30 · Everyday Card</div></div>`;
+ if (i.evRows) ev += `<div class="ev"><div class="evh">${i.group?"The 5 rows":"Evidence"}</div>${i.evRows.map(([a,b])=>`<div class="evrow"><span>${esc(a)}</span><span class="amt" style="font-weight:500">${esc(b)}</span></div>`).join("")}</div>`;
+ const whenK = i.kind==="sign_in_code"?`Expires in ${i.when.label}`:i.when.slot==="overdue"?`${i.when.label} late`:i.when.slot==="soon"?`Due ${i.when.label}`:({1:"Needs you now",2:"Money at stake",3:"Tidy up",4:"Idea"})[i.tier];
+ return `<div class="dt"><div class="k ${i.urgent?"u":""}">${esc(whenK)}</div><h3>${esc(i.title)}</h3><p>${esc(i.body)}</p>
+  ${i.conf?`<p><span class="conf"><i style="--w:${i.conf[1]}"></i>${esc(i.conf[0])} · ${esc(i.detail)}</span></p>`:""}
+  ${ev}
+  <div class="acts"><button class="btn p wide" data-d="${d}" data-act="${i.key}">${esc(i.primary)}</button>
+   ${i.alts.length?`<div class="alts">${i.alts.map(a=>`<button class="btn s" data-d="${d}" data-act="${i.key}" data-label="${esc(a)}">${esc(a)}</button>`).join("")}</div>`:""}</div>
+  ${i.slow?`<p class="note">Keeping one retires the other row, and “Both are real” is never asked again, so this one has no swipe and no bulk.</p>`:""}
+  ${i.noDismiss?`<p class="note">${esc(i.noDismiss)}</p>`:""}
+  <div class="snooze"><button class="btn g sm" data-d="${d}" data-snooze="${i.key}" data-until="tomorrow">${ic("clock")} Not now: tomorrow</button><button class="btn g sm" data-d="${d}" data-snooze="${i.key}" data-until="next week">Next week</button><button class="btn g sm" data-d="${d}" data-snooze="${i.key}" data-until="it changes">Until it changes</button></div></div>`;
+}
+
+function phones(d){
+ const n = counts(state[d].items);
+ return `<figure class="frame"><figcaption>Home · the “To review” card</figcaption><div class="scr phone" data-scr="${d}-home">${status()}
+   <div class="topbar"><h3>Home</h3><button class="iconbtn" aria-label="Assistant">${ic("sparkles")}</button></div><div class="body"><div class="hello">Friday, October 31</div>${HOME[d](d)}
+   <div class="ghost"><b>Balances</b><div class="bar"></div><div class="bar" style="width:70%"></div></div><div class="ghost"><b>This month</b><div class="bar" style="width:85%"></div></div></div>${tabbar("Home",n)}<div class="toast"></div></div></figure>
+  <figure class="frame"><figcaption>Review · the queue</figcaption><div class="scr phone" data-scr="${d}-list">${status()}
+   <div class="topbar"><h3>Review</h3><span class="rd" style="margin:0">${n} to decide</span></div><div class="body">${n||state[d].items.length?LIST[d](d,{selectable:true}):""}${!state[d].items.length?`<div class="empty"><b>Nothing to review</b>Last checked at today's 6:00 sync.</div>`:""}</div>${tabbar("Review",n)}<div class="toast"></div></div></figure>
+  <figure class="frame"><figcaption>Review · one item opened (tap any item in the queue)</figcaption><div class="scr phone" data-scr="${d}-item">${status()}
+   <div class="topbar"><button class="iconbtn" aria-label="Back">${ic("chevron-left")}</button><span class="rd" style="margin:0">${n} to decide</span><button class="iconbtn" aria-label="More">${ic("ellipsis")}</button></div><div class="body">${detail(d)}</div>${tabbar("Review",n)}<div class="toast"></div></div></figure>`;
+}
+function desktop(d){
+ const n = counts(state[d].items);
+ return `<figure class="frame"><figcaption>Desktop · list and detail side by side</figcaption><div class="scr desk" data-scr="${d}-desk" tabindex="0" data-keys="${d}">${rail(n)}
+  <div class="listpane"><div class="topbar"><h3>Review</h3><span class="rd" style="margin:0">${n} to decide</span></div><div class="body">${LIST[d](d,{selectable:true})}</div>
+  <div class="kbd"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>a</kbd> main action</span><span><kbd>s</kbd> snooze</span></div></div>
+  <div class="detailpane"><div class="body">${detail(d)}</div></div><div class="toast"></div></div></figure>`;
+}
+function render(){
+ const root = document.getElementById("dirs");
+ root.innerHTML = DIRS.map(D=>`<section class="dir" id="dir-${D.id}"><div class="dirhead"><div><h2>${esc(D.name)}</h2><p class="thesis">${esc(D.thesis)}</p>
+  <div class="facts"><div><b>Signature move</b>${esc(D.move)}</div><div><b>A typical day</b>${esc(D.path)}</div><div><b>Honest risk</b>${esc(D.risk)}</div></div></div></div>
+  <div class="frames">${VIEW==="phone"?phones(D.id):desktop(D.id)}</div></section>`).join("");
+ lucide.createIcons({attrs:{"stroke-width":1.8,width:18,height:18}});
+}
+// ---------- interactions ----------
+const undo = {};
+function toast(d, msg){
+ const ts = document.querySelectorAll(`#dir-${d} .toast`);
+ ts.forEach(t=>{t.innerHTML=`<span>${esc(msg)}</span><button data-undo="${d}">Undo</button>`; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),4200);});
+}
+function decide(d, key, msg){
+ const s = state[d]; const idx = s.items.findIndex(i=>i.key===key); if (idx<0) return;
+ undo[d] = {item:s.items[idx], idx, sel:s.sel};
+ const els = document.querySelectorAll(`#dir-${d} [data-open="${key}"]`); els.forEach(e=>e.classList.add("leaving"));
+ setTimeout(()=>{ s.items.splice(idx,1); if (s.sel===key) s.sel=(s.items[idx]||s.items[idx-1]||{}).key; render(); toast(d,msg); }, 260);
+}
+document.addEventListener("click", e=>{
+ const t = e.target.closest("button,[data-open],[data-expand]"); if (!t) return;
+ if (t.dataset.view){ VIEW=t.dataset.view; document.querySelectorAll("[data-view]").forEach(b=>b.setAttribute("aria-pressed", b===t)); render(); return; }
+ if (t.dataset.jump){ document.getElementById("dir-"+t.dataset.jump).scrollIntoView({behavior:"smooth",block:"start"}); return; }
+ if (t.dataset.pick){ const D = DIRS.find(x=>x.id===t.dataset.pick); if (window.albedo&&albedo.send) albedo.send(`I pick review-queue structure ${D.name} from the options board.`); t.textContent="Sent"; return; }
+ if (t.dataset.undo){ const u = undo[t.dataset.undo]; if (u){ state[t.dataset.undo].items.splice(u.idx,0,u.item); state[t.dataset.undo].sel=u.item.key; delete undo[t.dataset.undo]; render(); } return; }
+ if (t.dataset.expand){ state[t.dataset.d].expand3=true; render(); return; }
+ if (t.dataset.bulk){ const d=t.dataset.d, ln=t.dataset.bulk; const ks = state[d].items.filter(i=>i.lane===ln && (ln!=="Categories"||i.kind==="category_suggestion")).map(i=>i.key);
+   undo[d]=null; state[d].items = state[d].items.filter(i=>!ks.includes(i.key)); render(); toast(d, `${t.textContent.trim()}: done`); return; }
+ if (t.dataset.snooze){ decide(t.dataset.d, t.dataset.snooze, `Snoozed until ${t.dataset.until}`); return; }
+ if (t.dataset.act){ e.stopPropagation(); const d=t.dataset.d, i=state[d].items.find(x=>x.key===t.dataset.act);
+   if (!t.closest(".dt") && (i.slow||i.kind==="sign_in_code"||i.kind==="held_balance"||i.kind==="bank_reconnect")){ state[d].sel=i.key; render(); return; } // slow or input-needing items open instead
+   decide(d, i.key, `${t.dataset.label||i.primary}: done`); return; }
+ if (t.dataset.open){ state[t.dataset.d].sel=t.dataset.open; render(); return; }
+});
+document.addEventListener("keydown", e=>{
+ const f = e.target.closest && e.target.closest("[data-keys]"); if (!f || e.target.tagName==="INPUT") return;
+ const d=f.dataset.keys, s=state[d], i=s.items.findIndex(x=>x.key===s.sel);
+ if (e.key==="j"||e.key==="k"){ const n=s.items[Math.max(0,Math.min(s.items.length-1,i+(e.key==="j"?1:-1)))]; if(n){s.sel=n.key; render(); document.querySelector(`[data-keys="${d}"]`).focus();} }
+ if (e.key==="a" && s.items[i] && !s.items[i].slow){ decide(d, s.sel, `${s.items[i].primary}: done`); setTimeout(()=>document.querySelector(`[data-keys="${d}"]`)?.focus(),300); }
+ if (e.key==="s" && s.items[i]){ decide(d, s.sel, "Snoozed until tomorrow"); setTimeout(()=>document.querySelector(`[data-keys="${d}"]`)?.focus(),300); }
+});
+render();
+</script></body></html>
